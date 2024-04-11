@@ -24,14 +24,16 @@
 #define SECP256K1_MESSAGE_SIZE 32
 #define MAX_PREIMAGE_SIZE 1024
 #define MESSAGE_HEX_LEN 64
+#define ED25519_SIGNATURE_SIZE 64
+#define ED25519_PUBKEY_SIZE 32
 
 const char BTC_PREFIX[] = "CKB (Bitcoin Layer) transaction: 0x";
 // BTC_PREFIX_LEN = 35
-const size_t BTC_PREFIX_LEN = sizeof(BTC_PREFIX) - 1;
+#define BTC_PREFIX_LEN (sizeof(BTC_PREFIX) - 1)
 
 const char COMMON_PREFIX[] = "CKB transaction: 0x";
-// COMMON_PREFIX_LEN = 17
-const size_t COMMON_PREFIX_LEN = sizeof(COMMON_PREFIX) - 1;
+// COMMON_PREFIX_LEN = 19
+#define COMMON_PREFIX_LEN (sizeof(COMMON_PREFIX) - 1)
 
 enum CkbIdentityErrorCode {
   ERROR_IDENTITY_ARGUMENTS_LEN = -1,
@@ -61,7 +63,6 @@ typedef struct CkbIdentityType {
 
 enum IdentityFlagsType {
   IdentityFlagsCkb = 0,
-  // values 1~5 are used by pw-lock
   IdentityFlagsEthereum = 1,
   IdentityFlagsEos = 2,
   IdentityFlagsTron = 3,
@@ -70,6 +71,7 @@ enum IdentityFlagsType {
   IdentityCkbMultisig = 6,
 
   IdentityFlagsEthereumDisplaying = 18,
+  IdentityFlagsSolana = 19,
   IdentityFlagsOwnerLock = 0xFC,
   IdentityFlagsExec = 0xFD,
   IdentityFlagsDl = 0xFE,
@@ -372,6 +374,37 @@ int validate_signature_eos(void *prefilled_data, const uint8_t *sig,
   memcpy(output, out_pubkey, AUTH160_SIZE);
   *output_len = AUTH160_SIZE;
   return err;
+}
+
+int ed25519_verify(const unsigned char *signature, const unsigned char *message, size_t message_len, const unsigned char *public_key);
+int validate_signature_solana(void *prefilled_data, const uint8_t *sig,
+                           size_t sig_len, const uint8_t *msg, size_t msg_len,
+                           uint8_t *output, size_t *output_len) {
+  if (*output_len < AUTH160_SIZE || msg_len != SHA256_SIZE) {
+    return ERROR_INVALID_ARG;
+  }
+
+  // CKB transaction: 0x<signing message hash, hex format>
+  uint8_t displaying_msg[COMMON_PREFIX_LEN + MESSAGE_HEX_LEN] = {0};
+  memcpy(displaying_msg, COMMON_PREFIX, COMMON_PREFIX_LEN);
+  bin_to_hex(msg, displaying_msg + COMMON_PREFIX_LEN, msg_len);
+
+  // Unlike secp256k1, Ed25519 cannot recover the public key from the signature alone.
+  // The public key is located immediately after the signature.
+  const uint8_t* pubkey = sig + ED25519_SIGNATURE_SIZE;
+  int success = ed25519_verify(sig, displaying_msg, sizeof(displaying_msg), pubkey);
+  if (!success) {
+    return ERROR_MISMATCHED;
+  }
+
+  uint8_t hash[SHA256_SIZE] = {0};
+  blake2b_state ctx;
+  blake2b_init(&ctx, BLAKE2B_BLOCK_SIZE);
+  blake2b_update(&ctx, pubkey, ED25519_PUBKEY_SIZE);
+  blake2b_final(&ctx, hash, BLAKE2B_BLOCK_SIZE);
+  memcpy(output, hash, AUTH160_SIZE);
+  *output_len = AUTH160_SIZE;
+  return 0;
 }
 
 int generate_sighash_all(uint8_t *msg, size_t msg_len) {
@@ -953,8 +986,13 @@ int ckb_verify_identity(CkbIdentityType *id, uint8_t *sig, uint32_t sig_size,
     if (sig == NULL || sig_size != SECP256K1_SIGNATURE_SIZE) {
       return ERROR_IDENTITY_WRONG_ARGS;
     }
-    return verify_sighash_all(id->id, sig, sig_size, validate_signature_btc,
-                              convert_doge_message);
+    return verify_sighash_all(id->id, sig, sig_size, validate_signature_btc, convert_doge_message);
+  } else if (id->flags == IdentityFlagsSolana) {
+    if (sig == NULL || sig_size != (ED25519_SIGNATURE_SIZE + ED25519_PUBKEY_SIZE)) {
+      return ERROR_IDENTITY_WRONG_ARGS;
+    }
+    return verify_sighash_all(id->id, sig, sig_size, validate_signature_solana,
+                              convert_copy);                              
   } else if (id->flags == IdentityCkbMultisig) {
     uint8_t msg[BLAKE2B_BLOCK_SIZE];
     int ret = generate_sighash_all(msg, sizeof(msg));

@@ -10,3 +10,6 @@
 	path = deps/secp256k1-20210801
 	url = https://github.com/nervosnetwork/secp256k1.git
 	branch = schnorr
+[submodule "deps/ed25519"]
+	path = deps/ed25519
+	url = https://github.com/nervosnetwork/ed25519.git

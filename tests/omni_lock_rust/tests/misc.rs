@@ -29,8 +29,9 @@ use ckb_types::{
     prelude::*,
     H256 as CkbH256,
 };
+use ed25519_dalek::SigningKey;
 use lazy_static::lazy_static;
-use rand::prelude::{thread_rng, ThreadRng};
+use rand::prelude::thread_rng;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rand::RngCore;
@@ -70,6 +71,7 @@ pub const ERROR_NO_PAIR: i8 = -44;
 pub const ERROR_DUPLICATED_INPUTS: i8 = -45;
 pub const ERROR_DUPLICATED_OUTPUTS: i8 = -46;
 pub const ERROR_LOCK_SCRIPT_HASH_NOT_FOUND: i8 = 70;
+pub const ERROR_MISMATCHED: i8 = 73;
 pub const ERROR_NOT_ON_WHITE_LIST: i8 = 59;
 pub const ERROR_NO_WHITE_LIST: i8 = 83;
 pub const ERROR_ON_BLACK_LIST: i8 = 57;
@@ -155,15 +157,6 @@ pub fn new_smt(pairs: Vec<(H256, H256)>) -> SMT {
         smt.update(key, value).unwrap();
     }
     smt
-}
-
-pub fn gen_random_out_point(rng: &mut ThreadRng) -> OutPoint {
-    let hash = {
-        let mut buf = [0u8; 32];
-        rng.fill(&mut buf);
-        Pack::pack(&buf)
-    };
-    OutPoint::new(hash, 0)
 }
 
 //
@@ -515,7 +508,7 @@ pub fn append_rc(
 ) -> TransactionBuilder {
     let smt_key = config.id.to_smt_key();
     let (proofs, rc_datas, proof_masks) = generate_proofs(config.scheme, &vec![smt_key]);
-    let (rc_root, b0) = generate_rce_cell(dummy, tx_builder, rc_datas, config.smt_in_input);
+    let (rc_root, b0) = generate_rce_cell(dummy, tx_builder, rc_datas, config.smt_in_input, config);
 
     config.proofs = proofs;
     config.proof_masks = proof_masks;
@@ -532,11 +525,14 @@ pub fn append_rc(
 pub fn append_input_lock_script_hash(
     dummy: &mut DummyDataLoader,
     tx_builder: TransactionBuilder,
+    config: &TestConfig,
 ) -> (TransactionBuilder, Bytes) {
     let mut rng = thread_rng();
     let previous_tx_hash = {
-        let mut buf = [0u8; 32];
-        rng.fill(&mut buf);
+        let mut buf = [3u8; 32];
+        if config.random_tx {
+            rng.fill(&mut buf);
+        }
         buf.pack()
     };
     let previous_out_point = OutPoint::new(previous_tx_hash, 0);
@@ -718,6 +714,54 @@ pub fn sign_tx_by_input_group(
                         &identity,
                         None,
                     )
+                } else if config.id.flags == IDENTITY_FLAGS_SOLANA {
+                    if let Some(sig) = config.solana_phantom_sig.clone() {
+                        let msg = String::from("CKB transaction: 0x") + &hex::encode(message);
+                        println!("message to be signed by ed25519: {}", msg);
+
+                        let sig_plus_pubkey: Bytes = sig.into();
+                        gen_witness_lock(
+                            sig_plus_pubkey,
+                            config.use_rc,
+                            config.use_rc_identity,
+                            &proof_vec,
+                            &identity,
+                            None,
+                        )
+                    } else {
+                        // name conflicted
+                        use ed25519_dalek::Signer;
+                        // solana has different signing process and algorithm
+                        let signing_key = SigningKey::from_bytes(&config.solana_secret_key);
+                        let msg = String::from("CKB transaction: 0x") + &hex::encode(message);
+                        println!("message to be signed by ed25519: {}", msg);
+                        let sig = signing_key.sign(msg.as_bytes());
+                        let verifying_key = signing_key.verifying_key();
+
+                        let mut sig_plus_pubkey = sig.to_vec();
+                        match config.scheme {
+                            TestScheme::SolanaWrongSignature => {
+                                sig_plus_pubkey[0] ^= 1;
+                            }
+                            _ => {}
+                        }
+                        sig_plus_pubkey.extend(verifying_key.to_bytes());
+                        match config.scheme {
+                            TestScheme::SolanaWrongPubkey => {
+                                sig_plus_pubkey[64] ^= 1;
+                            }
+                            _ => {}
+                        }
+                        let sig_plus_pubkey: Bytes = sig_plus_pubkey.into();
+                        gen_witness_lock(
+                            sig_plus_pubkey,
+                            config.use_rc,
+                            config.use_rc_identity,
+                            &proof_vec,
+                            &identity,
+                            None,
+                        )
+                    }
                 } else {
                     let sig = config.private_key.sign_recoverable(&message).expect("sign");
                     let sig_bytes = Bytes::from(sig.serialize());
@@ -782,8 +826,10 @@ pub fn gen_tx_with_grouped_args(
     // setup sighash_all dep
     let sighash_all_out_point = {
         let contract_tx_hash = {
-            let mut buf = [0u8; 32];
-            rng.fill(&mut buf);
+            let mut buf = [1u8; 32];
+            if config.random_tx {
+                rng.fill(&mut buf);
+            }
             buf.pack()
         };
         OutPoint::new(contract_tx_hash.clone(), 0)
@@ -804,8 +850,10 @@ pub fn gen_tx_with_grouped_args(
     // always success
     let always_success_out_point = {
         let contract_tx_hash = {
-            let mut buf = [0u8; 32];
-            rng.fill(&mut buf);
+            let mut buf = [2u8; 32];
+            if config.random_tx {
+                rng.fill(&mut buf);
+            }
             buf.pack()
         };
         OutPoint::new(contract_tx_hash.clone(), 0)
@@ -824,8 +872,10 @@ pub fn gen_tx_with_grouped_args(
     // setup secp256k1_data dep
     let secp256k1_data_out_point = {
         let tx_hash = {
-            let mut buf = [0u8; 32];
-            rng.fill(&mut buf);
+            let mut buf = [11u8; 32];
+            if config.random_tx {
+                rng.fill(&mut buf);
+            }
             buf.pack()
         };
         OutPoint::new(tx_hash, 0)
@@ -883,7 +933,7 @@ pub fn gen_tx_with_grouped_args(
 
     if config.is_owner_lock() {
         // insert an "always success" script as first input script.
-        let (b0, blake160) = append_input_lock_script_hash(dummy, tx_builder);
+        let (b0, blake160) = append_input_lock_script_hash(dummy, tx_builder, config);
         tx_builder = b0;
         config.id.blake160 = blake160;
     }
@@ -896,7 +946,9 @@ pub fn gen_tx_with_grouped_args(
         for _ in 0..inputs_size {
             let previous_tx_hash = {
                 let mut buf = [0u8; 32];
-                rng.fill(&mut buf);
+                if config.random_tx {
+                    rng.fill(&mut buf);
+                }
                 buf.pack()
             };
             args = if config.is_owner_lock() {
@@ -939,7 +991,9 @@ pub fn gen_tx_with_grouped_args(
                 32
             };
             random_extra_witness.resize(witness_len, 0);
-            rng.fill(&mut random_extra_witness[..]);
+            if config.random_tx {
+                rng.fill(&mut random_extra_witness[..]);
+            }
 
             let witness_args = WitnessArgsBuilder::default()
                 .input_type(Some(Bytes::copy_from_slice(&random_extra_witness[..])).pack())
@@ -1037,6 +1091,7 @@ pub const IDENTITY_FLAGS_BITCOIN: u8 = 4;
 pub const IDENTITY_FLAGS_DOGECOIN: u8 = 5;
 pub const IDENTITY_FLAGS_MULTISIG: u8 = 6;
 pub const IDENTITY_FLAGS_ETHEREUM_DISPLAYING: u8 = 18;
+pub const IDENTITY_FLAGS_SOLANA: u8 = 19;
 
 pub const IDENTITY_FLAGS_OWNER_LOCK: u8 = 0xFC;
 pub const IDENTITY_FLAGS_EXEC: u8 = 0xFD;
@@ -1450,6 +1505,9 @@ pub struct TestConfig {
     pub leading_witness_count: usize,
 
     pub chain_config: Option<Box<dyn ChainConfig>>,
+    pub random_tx: bool,
+    pub solana_secret_key: [u8; 32],
+    pub solana_phantom_sig: Option<Vec<u8>>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -1471,6 +1529,8 @@ pub enum TestScheme {
     OwnerLockWithoutWitness,
 
     RsaWrongSignature,
+    SolanaWrongSignature,
+    SolanaWrongPubkey,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -1548,6 +1608,9 @@ impl TestConfig {
             leading_witness_count: 0,
 
             chain_config: None,
+            random_tx: true,
+            solana_secret_key: [0u8; 32],
+            solana_phantom_sig: None,
         }
     }
 
@@ -1838,13 +1901,16 @@ pub fn generate_rce_cell(
     mut tx_builder: TransactionBuilder,
     rc_data: Vec<Bytes>,
     smt_in_input: bool,
+    config: &TestConfig,
 ) -> (Byte32, TransactionBuilder) {
     let mut rng = thread_rng();
     let mut cell_vec_builder = RCCellVecBuilder::default();
 
     for rc_rule in rc_data {
         let mut random_args: [u8; 32] = Default::default();
-        rng.fill(&mut random_args[..]);
+        if config.random_tx {
+            rng.fill(&mut random_args[..]);
+        }
         // let's first build the RCE cell which contains the RCData(RCRule/RCCellVec).
         let (b0, rce_script) = build_script(
             dummy,
@@ -1869,7 +1935,9 @@ pub fn generate_rce_cell(
         .build();
 
     let mut random_args: [u8; 32] = Default::default();
-    rng.fill(&mut random_args[..]);
+    if config.random_tx {
+        rng.fill(&mut random_args[..]);
+    }
 
     let bin = rce_cell_content.as_slice();
 

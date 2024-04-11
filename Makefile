@@ -24,7 +24,7 @@ CLANG_FORMAT_DOCKER := kason223/clang-format@sha256:3cce35b0400a7d420ec8504558a0
 all: build/omni_lock build/always_success
 
 all-via-docker: ${PROTOCOL_HEADER}
-	docker run --rm -v `pwd`:/code ${BUILDER_DOCKER} bash -c "cd /code && make"
+	docker run -u $(shell id -u):$(shell id -g) --rm -v `pwd`:/code ${BUILDER_DOCKER} bash -c "cd /code && make"
 
 
 build/always_success: c/always_success.c
@@ -45,6 +45,15 @@ $(SECP256K1_SRC_20210801):
 		./autogen.sh && \
 		CC=$(CC) LD=$(LD) ./configure --with-bignum=no --enable-ecmult-static-precomputation --enable-endomorphism --enable-module-recovery --host=$(TARGET) && \
 		make src/ecmult_static_pre_context.h src/ecmult_static_context.h
+
+
+build/ed25519/%.o: deps/ed25519/src/%.c
+	mkdir -p build/ed25519
+	$(CC) -c -DCKB_DECLARATION_ONLY -I deps/ed25519/src $(OMNI_LOCK_CFLAGS) -o $@ $^
+
+build/libed25519.a: build/ed25519/sign.o build/ed25519/verify.o build/ed25519/sha512.o build/ed25519/sc.o build/ed25519/keypair.o \
+					build/ed25519/key_exchange.o build/ed25519/ge.o build/ed25519/fe.o build/ed25519/add_scalar.o
+	$(AR) cr $@ $^
 
 
 build/impl.o: deps/ckb-c-std-lib/libc/src/impl.c
@@ -76,8 +85,8 @@ omni_lock_mol:
 	${MOLC} --language - --schema-file c/omni_lock.mol --format json > build/omni_lock_mol2.json
 	moleculec-c2 --input build/omni_lock_mol2.json | clang-format -style=Google > c/omni_lock_mol2.h
 
-build/omni_lock: c/omni_lock.c c/omni_lock_supply.h c/omni_lock_acp.h c/secp256k1_lock.h build/secp256k1_data_info_20210801.h $(SECP256K1_SRC_20210801) c/ckb_identity.h
-	$(CC) $(OMNI_LOCK_CFLAGS) $(LDFLAGS) -o $@ $<
+build/omni_lock: c/omni_lock.c c/omni_lock_supply.h c/omni_lock_acp.h c/secp256k1_lock.h build/secp256k1_data_info_20210801.h $(SECP256K1_SRC_20210801) c/ckb_identity.h build/libed25519.a
+	$(CC) $(OMNI_LOCK_CFLAGS) $(LDFLAGS) -o $@ $< build/libed25519.a
 	cp $@ $@.debug
 	$(OBJCOPY) --strip-debug --strip-all $@
 
@@ -88,6 +97,7 @@ clean:
 	rm -rf build/*.debug
 	rm -f build/omni_lock
 	cd deps/secp256k1-20210801 && [ -f "Makefile" ] && make clean
+	rm -rf build/ed25519 build/libed25519.a 
 
 install-tools:
 	if [ ! -x "$$(command -v "${MOLC}")" ] \

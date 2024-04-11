@@ -37,6 +37,11 @@ int hex2bin(uint8_t* buf, const char* src) {
   return length;
 }
 
+int ed25519_verify(const unsigned char* signature, const unsigned char* message,
+                   size_t message_len, const unsigned char* public_key) {
+  return 0;
+}
+
 UTEST(pubkey_hash, pass) {
   init_input(&g_setting);
   g_setting.flags = IdentityFlagsCkb;
