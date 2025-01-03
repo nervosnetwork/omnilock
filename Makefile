@@ -4,7 +4,6 @@ LD := $(TARGET)-gcc
 OBJCOPY := $(TARGET)-objcopy
 CFLAGS := -fPIC -O3 -fno-builtin-printf -fno-builtin-memcmp -nostdinc -nostdlib -nostartfiles -fvisibility=hidden -fdata-sections -ffunction-sections -I deps/secp256k1/src -I deps/secp256k1 -I deps/ckb-c-std-lib -I deps/ckb-c-std-lib/libc -I deps/ckb-c-std-lib/molecule -I c -I build -Wall -Werror -Wno-nonnull -Wno-nonnull-compare -Wno-unused-function -g
 LDFLAGS := -Wl,-static -fdata-sections -ffunction-sections -Wl,--gc-sections
-SECP256K1_SRC_20210801 := deps/secp256k1-20210801/src/ecmult_static_pre_context.h
 
 
 OMNI_LOCK_CFLAGS :=$(subst ckb-c-std-lib,ckb-c-stdlib-20210801,$(CFLAGS)) -I deps/sparse-merkle-tree/c
@@ -35,17 +34,9 @@ build/always_success: c/always_success.c
 build/secp256k1_data_info_20210801.h: build/dump_secp256k1_data_20210801
 	$<
 
-build/dump_secp256k1_data_20210801: c/dump_secp256k1_data_20210801.c $(SECP256K1_SRC_20210801)
+build/dump_secp256k1_data_20210801: c/dump_secp256k1_data_20210801.c
 	mkdir -p build
 	gcc -I deps/secp256k1-20210801/src -I deps/secp256k1-20210801 -o $@ $<
-
-
-$(SECP256K1_SRC_20210801):
-	cd deps/secp256k1-20210801 && \
-		./autogen.sh && \
-		CC=$(CC) LD=$(LD) ./configure --with-bignum=no --enable-ecmult-static-precomputation --enable-endomorphism --enable-module-recovery --host=$(TARGET) && \
-		make src/ecmult_static_pre_context.h src/ecmult_static_context.h
-
 
 build/impl.o: deps/ckb-c-std-lib/libc/src/impl.c
 	$(CC) -c $(filter-out -DCKB_DECLARATION_ONLY, $(CFLAGS_MBEDTLS)) $(LDFLAGS_MBEDTLS) -o $@ $^
@@ -76,7 +67,7 @@ omni_lock_mol:
 	${MOLC} --language - --schema-file c/omni_lock.mol --format json > build/omni_lock_mol2.json
 	moleculec-c2 --input build/omni_lock_mol2.json | clang-format -style=Google > c/omni_lock_mol2.h
 
-build/omni_lock: c/omni_lock.c c/omni_lock_supply.h c/omni_lock_acp.h c/secp256k1_lock.h build/secp256k1_data_info_20210801.h $(SECP256K1_SRC_20210801) c/ckb_identity.h
+build/omni_lock: c/omni_lock.c c/omni_lock_supply.h c/omni_lock_acp.h c/secp256k1_lock.h build/secp256k1_data_info_20210801.h c/ckb_identity.h
 	$(CC) $(OMNI_LOCK_CFLAGS) $(LDFLAGS) -o $@ $<
 	cp $@ $@.debug
 	$(OBJCOPY) --strip-debug --strip-all $@

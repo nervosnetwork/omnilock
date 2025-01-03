@@ -7,20 +7,20 @@
  * directly, the final binary will include all functions rather than those used.
  */
 #define HAVE_CONFIG_H 1
-#include <secp256k1.c>
+#include <precomputed_ecmult.c>
 
 #define ERROR_IO -1
 
 int main(int argc, char* argv[]) {
-  size_t pre_size = sizeof(secp256k1_ecmult_static_pre_context);
-  size_t pre128_size = sizeof(secp256k1_ecmult_static_pre128_context);
+  size_t pre_size = sizeof(secp256k1_pre_g);
+  size_t pre128_size = sizeof(secp256k1_pre_g_128);
 
   FILE* fp_data = fopen("build/secp256k1_data_20210801", "wb");
   if (!fp_data) {
     return ERROR_IO;
   }
-  fwrite(secp256k1_ecmult_static_pre_context, pre_size, 1, fp_data);
-  fwrite(secp256k1_ecmult_static_pre128_context, pre128_size, 1, fp_data);
+  fwrite(secp256k1_pre_g, pre_size, 1, fp_data);
+  fwrite(secp256k1_pre_g_128, pre128_size, 1, fp_data);
   fclose(fp_data);
 
   FILE* fp = fopen("build/secp256k1_data_info_20210801.h", "w");
@@ -37,8 +37,8 @@ int main(int argc, char* argv[]) {
   blake2b_state blake2b_ctx;
   uint8_t hash[32];
   blake2b_init(&blake2b_ctx, 32);
-  blake2b_update(&blake2b_ctx, secp256k1_ecmult_static_pre_context, pre_size);
-  blake2b_update(&blake2b_ctx, secp256k1_ecmult_static_pre128_context,
+  blake2b_update(&blake2b_ctx, secp256k1_pre_g, pre_size);
+  blake2b_update(&blake2b_ctx, secp256k1_pre_g_128,
                  pre128_size);
   blake2b_final(&blake2b_ctx, hash, 32);
 

@@ -15,7 +15,18 @@
  */
 #define HAVE_CONFIG_H 1
 #define USE_EXTERNAL_DEFAULT_CALLBACKS
+#define SECP256K1_PRECOMPUTED_ECMULT_H
+#include "group.h"
+#define WINDOW_G ECMULT_WINDOW_SIZE
+secp256k1_ge_storage* secp256k1_pre_g = NULL;
+secp256k1_ge_storage* secp256k1_pre_g_128 = NULL;
+#undef SECP256K1_NO_BUILD
+#define COMB_BLOCKS 1
+#define COMB_TEETH 1
 #include <secp256k1.c>
+#include "modules/recovery/main_impl.h"
+const secp256k1_ge_storage secp256k1_ecmult_gen_prec_table[COMB_BLOCKS]
+                                                          [COMB_POINTS];
 
 void secp256k1_default_illegal_callback_fn(const char* str, void* data) {
   (void)str;
@@ -68,19 +79,14 @@ int ckb_secp256k1_custom_verify_only_initialize(secp256k1_context* context,
     return CKB_SECP256K1_HELPER_ERROR_LOADING_DATA;
   }
 
-  context->illegal_callback = default_illegal_callback;
-  context->error_callback = default_error_callback;
+  secp256k1_pre_g = (secp256k1_ge_storage*)data;
+  secp256k1_pre_g_128 = (secp256k1_ge_storage*)(data + CKB_SECP256K1_DATA_PRE_SIZE);
 
-  secp256k1_ecmult_context_init(&context->ecmult_ctx);
-  secp256k1_ecmult_gen_context_init(&context->ecmult_gen_ctx);
-
-  /* Recasting data to (uint8_t*) for pointer math */
-  uint8_t* p = data;
-  secp256k1_ge_storage(*pre_g)[] = (secp256k1_ge_storage(*)[])p;
-  secp256k1_ge_storage(*pre_g_128)[] =
-      (secp256k1_ge_storage(*)[])(&p[CKB_SECP256K1_DATA_PRE_SIZE]);
-  context->ecmult_ctx.pre_g = pre_g;
-  context->ecmult_ctx.pre_g_128 = pre_g_128;
+  secp256k1_context* ctx = secp256k1_context_preallocated_create(
+      (void*)context, SECP256K1_CONTEXT_VERIFY);
+  if (!ctx) {
+      return CKB_SECP256K1_HELPER_ERROR_LOADING_DATA;
+  }
 
   return 0;
 }
