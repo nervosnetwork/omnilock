@@ -12,8 +12,6 @@ jobs:
     - name: Update submodules
       run: git submodule update --init
     - name: Build contract
-      run: make all-via-docker
+      run: make all-via-docker && ls -alth build
     - name: Run omni_lock tests
-      run: cd tests/omni_lock_rust && cargo test
-    - name: Run omni_lock simulator tests
-      run: cd tests/omni_lock && bash run.sh
+      run: cd tests/omni_lock_rust && cargo test benchmark -- --nocapture

@@ -8,5 +8,5 @@
 	branch = master
 [submodule "deps/secp256k1-20210801"]
 	path = deps/secp256k1-20210801
-	url = https://github.com/nervosnetwork/secp256k1.git
-	branch = schnorr
+	url = https://github.com/bitcoin-core/secp256k1.git
+	branch = master

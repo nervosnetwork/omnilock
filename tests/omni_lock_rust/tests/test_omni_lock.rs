@@ -524,7 +524,8 @@ fn test_btc_success(vtype: u8) {
 
     verifier.set_debug_printer(debug_printer);
     let verify_result = verifier.verify(MAX_CYCLES);
-    verify_result.expect("pass verification");
+    let cycles = (verify_result.unwrap() as f64) / 1024. / 1024.;
+    println!("cycles = {:.2} M", cycles);
 }
 
 fn test_btc_err_pubkey(vtype: u8) {
@@ -554,6 +555,11 @@ fn test_btc_err_pubkey(vtype: u8) {
 fn test_btc(vtype: u8) {
     test_btc_success(vtype);
     test_btc_err_pubkey(vtype);
+}
+
+#[test]
+fn test_btc_benchmark() {
+    test_btc_success(BITCOIN_V_TYPE_SEGWITBECH32);
 }
 
 #[test]
