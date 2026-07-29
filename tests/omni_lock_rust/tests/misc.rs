@@ -75,6 +75,7 @@ pub const ERROR_NO_WHITE_LIST: i8 = 83;
 pub const ERROR_ON_BLACK_LIST: i8 = 57;
 pub const ERROR_RCE_EMERGENCY_HALT: i8 = 54;
 pub const ERROR_RSA_VERIFY_FAILED: i8 = 42;
+pub const ERROR_INCORRECT_SINCE_FLAGS: i8 = -23;
 pub const ERROR_INCORRECT_SINCE_VALUE: i8 = -24;
 pub const ERROR_ISO97962_INVALID_ARG9: i8 = 61;
 // sudt supply errors

@@ -6,14 +6,14 @@ mod misc;
 use ckb_chain_spec::consensus::ConsensusBuilder;
 use ckb_crypto::secp::Generator;
 use ckb_error::assert_error_eq;
-use ckb_script::{ScriptError, TransactionScriptsVerifier, TxVerifyEnv};
+use ckb_script::{TransactionScriptsVerifier, TxVerifyEnv};
 use ckb_types::{
     bytes::Bytes,
     bytes::BytesMut,
     core::{
         cell::ResolvedTransaction, hardfork::HardForkSwitch, EpochNumberWithFraction, HeaderView,
     },
-    packed::WitnessArgs,
+    packed::{CellInput, WitnessArgs},
     prelude::*,
     H256,
 };
@@ -459,6 +459,280 @@ fn test_rsa_via_dl_unlock_with_time_lock_failed() {
     let verify_result = verifier.verify(MAX_CYCLES);
 
     assert_script_error(verify_result.unwrap_err(), ERROR_INCORRECT_SINCE_VALUE);
+}
+
+#[test]
+fn test_since_relative_epoch() {
+    let mut data_loader = DummyDataLoader::new();
+
+    let since_epoch = EpochNumberWithFraction::new(200, 5, 100);
+    // relative epoch flag: 0b10100000 << 56
+    let args_since = 0xa000_0000_0000_0000u64 + since_epoch.full_value();
+
+    let mut config = TestConfig::new(IDENTITY_FLAGS_DL, false);
+    config.set_rsa();
+    config.set_since(args_since, 0);
+
+    let raw_tx = gen_tx(&mut data_loader, &mut config);
+
+    {
+        // default since is 0, flags mismatch
+        let tx = sign_tx(&mut data_loader, raw_tx.clone(), &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        assert_script_error(verify_result.unwrap_err(), ERROR_INCORRECT_SINCE_FLAGS);
+    }
+    {
+        // absolute epoch flag instead of relative
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| {
+                i.as_builder()
+                    .since((0x2000_0000_0000_0000u64 + since_epoch.full_value()).pack())
+                    .build()
+            })
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        assert_script_error(verify_result.unwrap_err(), ERROR_INCORRECT_SINCE_FLAGS);
+    }
+    {
+        // smaller fraction: 200 + 2/200 < 200 + 5/100
+        let epoch = EpochNumberWithFraction::new(200, 2, 200);
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| {
+                i.as_builder()
+                    .since((0xa000_0000_0000_0000u64 + epoch.full_value()).pack())
+                    .build()
+            })
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        assert_script_error(verify_result.unwrap_err(), ERROR_INCORRECT_SINCE_VALUE);
+    }
+    {
+        // larger fraction with different encoding: 200 + 6/50 > 200 + 5/100
+        let epoch = EpochNumberWithFraction::new(200, 6, 50);
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| {
+                i.as_builder()
+                    .since((0xa000_0000_0000_0000u64 + epoch.full_value()).pack())
+                    .build()
+            })
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        verify_result.expect("pass verification");
+    }
+    {
+        // larger fraction: 200 + 1/2 > 200 + 5/100
+        let epoch = EpochNumberWithFraction::new(200, 1, 2);
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| {
+                i.as_builder()
+                    .since((0xa000_0000_0000_0000u64 + epoch.full_value()).pack())
+                    .build()
+            })
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        verify_result.expect("pass verification");
+    }
+    {
+        // exact match
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| i.as_builder().since(args_since.pack()).build())
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        verify_result.expect("pass verification");
+    }
+    {
+        // larger value
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| i.as_builder().since((args_since + 1).pack()).build())
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        verify_result.expect("pass verification");
+    }
+}
+
+#[test]
+fn test_since_epoch_length_zero() {
+    let mut data_loader = DummyDataLoader::new();
+
+    let since_epoch = EpochNumberWithFraction::new(200, 5, 100);
+    let args_since = 0x2000_0000_0000_0000u64 + since_epoch.full_value();
+
+    let mut config = TestConfig::new(IDENTITY_FLAGS_DL, false);
+    config.set_rsa();
+    config.set_since(args_since, 0);
+
+    let raw_tx = gen_tx(&mut data_loader, &mut config);
+
+    {
+        // input since has length=0, index=100, epoch=200
+        // Since len=0 is treated as len=1, 100/1 > 5/100, so it should fail
+        let input_since = 0x2000_0000_0000_0000u64 | (100u64 << 24) | 200u64;
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| i.as_builder().since(input_since.pack()).build())
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        assert_script_error(verify_result.unwrap_err(), ERROR_INCORRECT_SINCE_VALUE);
+    }
+    {
+        // input since has epoch=201, length=0
+        // epoch 201 > 200, so it should pass
+        let input_since = 0x2000_0000_0000_0000u64 | 201u64;
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| i.as_builder().since(input_since.pack()).build())
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        verify_result.expect("pass verification");
+    }
+    {
+        // input has epoch 200, index 4, length 100 → 4/100 < 5/100, should fail
+        let epoch = EpochNumberWithFraction::new(200, 4, 100);
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| {
+                i.as_builder()
+                    .since((0x2000_0000_0000_0000u64 + epoch.full_value()).pack())
+                    .build()
+            })
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        assert_script_error(verify_result.unwrap_err(), ERROR_INCORRECT_SINCE_VALUE);
+    }
+    {
+        // input has epoch 200, index 6, length 100 → 6/100 > 5/100, should pass
+        let epoch = EpochNumberWithFraction::new(200, 6, 100);
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| {
+                i.as_builder()
+                    .since((0x2000_0000_0000_0000u64 + epoch.full_value()).pack())
+                    .build()
+            })
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        verify_result.expect("pass verification");
+    }
+    {
+        // exact match
+        let inputs: Vec<CellInput> = raw_tx
+            .inputs()
+            .into_iter()
+            .map(|i| i.as_builder().since(args_since.pack()).build())
+            .collect();
+        let raw_tx = raw_tx.as_advanced_builder().set_inputs(inputs).build();
+        let tx = sign_tx(&mut data_loader, raw_tx, &mut config);
+        let resolved_tx = build_resolved_tx(&data_loader, &tx);
+        let consensus = gen_consensus();
+        let tx_env = gen_tx_env();
+        let mut verifier =
+            TransactionScriptsVerifier::new(&resolved_tx, &consensus, &data_loader, &tx_env);
+        verifier.set_debug_printer(debug_printer);
+        let verify_result = verifier.verify(MAX_CYCLES);
+        verify_result.expect("pass verification");
+    }
 }
 
 // currently, the signature can only be signed via hardware.
