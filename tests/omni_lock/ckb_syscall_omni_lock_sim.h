@@ -794,7 +794,7 @@ int ckb_look_for_dep_with_hash2(const uint8_t* code_hash, uint8_t hash_type,
 #define ERROR_MEMORY_NOT_ENOUGH -23
 #define ERROR_DYNAMIC_LOADING -24
 #define RISCV_PGSIZE 4096
-#define ROUNDUP(a, b) ((((a)-1) / (b) + 1) * (b))
+#define ROUNDUP(a, b) ((((a) - 1) / (b) + 1) * (b))
 #define MAX_PATH_SIZE 1024
 
 typedef struct LibMappingEntry {

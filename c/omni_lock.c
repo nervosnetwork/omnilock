@@ -358,7 +358,7 @@ int parse_witness_lock(WitnessLockType *witness_lock) {
   if (witness_lock->has_signature) {
     mol2_cursor_t signature_cursor = signature_opt.t->unwrap(&signature_opt);
     witness_lock->signature_size = mol2_read_at(
-        &signature_cursor, witness_lock->signature, signature_cursor.size);
+        &signature_cursor, witness_lock->signature, MAX_SIGNATURE_SIZE);
     CHECK2(signature_cursor.size == witness_lock->signature_size,
            ERROR_INVALID_MOL_FORMAT);
   }
@@ -366,7 +366,7 @@ int parse_witness_lock(WitnessLockType *witness_lock) {
   if (preimage_opt.t->is_some(&preimage_opt)) {
     mol2_cursor_t preimage_cursor = preimage_opt.t->unwrap(&preimage_opt);
     witness_lock->preimage_size = mol2_read_at(
-        &preimage_cursor, witness_lock->preimage, preimage_cursor.size);
+        &preimage_cursor, witness_lock->preimage, MAX_PREIMAGE_SIZE);
     CHECK2(preimage_cursor.size == witness_lock->preimage_size,
            ERROR_INVALID_MOL_FORMAT);
   } else {

@@ -15,7 +15,7 @@ const CKB_HASH_PERSONALIZATION: &[u8] = b"ckb-default-hash";
 const BINARIES: &[(&str, &str)] = &[
     (
         "omni_lock",
-        "768f306681da232ceb0b94f436c5f813377179762a831c5ad8797bd4fd2d118d",
+        "bd478b228e02f1d5278f4df08253f0b6b04f1873f1ba9e419e74c4e2953b2c57",
     ),
 ];
 
