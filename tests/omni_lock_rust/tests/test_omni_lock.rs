@@ -631,7 +631,7 @@ fn test_since_epoch_length_zero() {
 
     {
         // input since has length=0, index=100, epoch=200
-        // Since len=0 is treated as len=1, 100/1 > 5/100, so it should fail
+        // Since len=0 is treated as len=1 and index=0, 0/1 < 5/100, so it should fail
         let input_since = 0x2000_0000_0000_0000u64 | (100u64 << 24) | 200u64;
         let inputs: Vec<CellInput> = raw_tx
             .inputs()
