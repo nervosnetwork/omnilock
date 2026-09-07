@@ -6,7 +6,8 @@
 /* since */
 #define SINCE_VALUE_BITS 56
 #define SINCE_VALUE_MASK 0x00ffffffffffffff
-#define SINCE_EPOCH_FRACTION_FLAG 0b00100000
+#define SINCE_EPOCH_FRACTION_ABSOLUTE_FLAG 0b00100000
+#define SINCE_EPOCH_FRACTION_RELATIVE_FLAG 0b10100000
 
 /* a and b are since value,
  return 0 if a is equals to b,
@@ -30,11 +31,19 @@ int epoch_number_with_fraction_cmp(uint64_t a, uint64_t b) {
   uint64_t a_epoch = (a >> NUMBER_OFFSET) & NUMBER_MASK;
   uint64_t a_index = (a >> INDEX_OFFSET) & INDEX_MASK;
   uint64_t a_len = (a >> LENGTH_OFFSET) & LENGTH_MASK;
+  if (a_len == 0) {
+    a_index = 0;
+    a_len = 1;
+  }
 
   /* extract b epoch */
   uint64_t b_epoch = (b >> NUMBER_OFFSET) & NUMBER_MASK;
   uint64_t b_index = (b >> INDEX_OFFSET) & INDEX_MASK;
   uint64_t b_len = (b >> LENGTH_OFFSET) & LENGTH_MASK;
+  if (b_len == 0) {
+    b_index = 0;
+    b_len = 1;
+  }
 
   if (a_epoch < b_epoch) {
     return -1;
@@ -85,7 +94,8 @@ int check_since(uint64_t since) {
     if (since_flags != input_since_flags) {
       return ERROR_INCORRECT_SINCE_FLAGS;
     }
-    if (input_since_flags == SINCE_EPOCH_FRACTION_FLAG) {
+    if (input_since_flags == SINCE_EPOCH_FRACTION_ABSOLUTE_FLAG ||
+        input_since_flags == SINCE_EPOCH_FRACTION_RELATIVE_FLAG) {
       ret = epoch_number_with_fraction_cmp(input_since_value, since_value);
       if (ret < 0) {
         return ERROR_INCORRECT_SINCE_VALUE;
